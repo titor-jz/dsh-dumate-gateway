@@ -51,6 +51,22 @@ This plugin is built to look exactly like you typing in DuMate, and to add no hi
 Do not point batch jobs or unattended automation at `http://127.0.0.1:7321`: that is what turns
 ordinary personal usage into the traffic pattern that gets an account flagged.
 
+## Install from the DSH Discover index
+
+DSH ships no central plugin index: `Plugins → Discover` lists only the index sources a person adds.
+This repository publishes one, so the plugin shows up there with its icon, description and version:
+
+```text
+https://raw.githubusercontent.com/titor-jz/dsh-dumate-gateway/main/market/index.json
+```
+
+1. `Plugins` → **Experimental plugins** → switch on **Custom plugin indexes**.
+2. Open the **Discover** tab → **Add index source** → paste the URL above.
+3. Select **DuMate gateway** → **Install**. It installs from this repository at a pinned commit.
+
+Without an index you can still install it directly: `Plugins` → **Add plugin** → paste
+`git+https://github.com/titor-jz/dsh-dumate-gateway.git`, or point the dialog at a local checkout.
+
 ## Install
 
 DeepSeek Harness → **Plugins** → **Add plugin** → pick this directory. Host-only bundle: no build

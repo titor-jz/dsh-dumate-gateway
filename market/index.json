@@ -1,0 +1,84 @@
+{
+  "format": 1,
+  "title": {
+    "en": "DuMate gateway",
+    "zh": "DuMate 网关"
+  },
+  "description": {
+    "en": "Plugins by titor-jz: bring local model services into DeepSeek Harness.",
+    "zh": "titor-jz 的插件：把本机模型服务接进 DeepSeek Harness。"
+  },
+  "metadata": {
+    "categories": {
+      "models": {
+        "title": {
+          "en": "Models & providers",
+          "zh": "模型与提供商"
+        }
+      }
+    },
+    "labels": {
+      "dumate": {
+        "title": {
+          "en": "DuMate",
+          "zh": "DuMate"
+        }
+      },
+      "local": {
+        "title": {
+          "en": "Local service",
+          "zh": "本机服务"
+        }
+      }
+    },
+    "sortKeys": {}
+  },
+  "plugins": [
+    {
+      "name": "dsh-dumate-gateway",
+      "title": {
+        "en": "DuMate gateway",
+        "zh": "DuMate 网关"
+      },
+      "description": {
+        "en": "Lists the live DuMate model table in the model selector, streams chat through it, and adds a loopback OpenAI/Anthropic gateway plus a right-sidebar dashboard.",
+        "zh": "把 DuMate 的实时模型表接进模型选择器并转发流式对话，另带一个只绑回环的 OpenAI/Anthropic 网关和右侧栏仪表盘。"
+      },
+      "icon": "https://raw.githubusercontent.com/titor-jz/dsh-dumate-gateway/main/icon.svg",
+      "author": "titor-jz",
+      "homepage": "https://github.com/titor-jz/dsh-dumate-gateway#readme",
+      "repository": {
+        "url": "https://github.com/titor-jz/dsh-dumate-gateway"
+      },
+      "metadata": {
+        "category": "models",
+        "keywords": [
+          "dumate",
+          "gateway",
+          "openai-compatible",
+          "local models",
+          "sidebar"
+        ],
+        "labels": [
+          "dumate",
+          "local"
+        ],
+        "sortKeys": {}
+      },
+      "versions": [
+        {
+          "version": "0.0.1",
+          "publishTimestamp": 1794895621,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/titor-jz/dsh-dumate-gateway",
+            "commit": "bbc77f0d88c5047aaa2db499cc00a55141ba3c67"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.1"
+          }
+        }
+      ]
+    }
+  ]
+}
