@@ -1,5 +1,7 @@
 # dsh-dumate-gateway
 
+English | [中文](README.zh.md)
+
 Bring locally running OpenAI-compatible model services into DeepSeek Harness — starting with the
 DuMate desktop app — without hand-editing a provider profile for every restart.
 

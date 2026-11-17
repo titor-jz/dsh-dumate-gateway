@@ -23,7 +23,8 @@
     "README.md",
     "LICENSE",
     "docs/DETAIL.md",
-    "docs/assets"
+    "docs/assets",
+    "README.zh.md"
   ],
   "dsh": {
     "bundle": {
