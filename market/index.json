@@ -68,11 +68,10 @@
       "versions": [
         {
           "version": "0.0.1",
-          "publishTimestamp": 1794895621,
+          "publishTimestamp": 1794908654,
           "source": {
-            "type": "git",
-            "url": "https://github.com/titor-jz/dsh-dumate-gateway",
-            "commit": "bbc77f0d88c5047aaa2db499cc00a55141ba3c67"
+            "type": "npm",
+            "registry": "https://registry.npmjs.org"
           },
           "engines": {
             "dsh": ">=0.2.2-rc.1"

@@ -2,6 +2,8 @@
 
 [English](README.md) | 中文
 
+[![npm](https://img.shields.io/npm/v/dsh-dumate-gateway.svg)](https://www.npmjs.com/package/dsh-dumate-gateway) [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 把**本机正在运行的 OpenAI 兼容模型服务**接进 DeepSeek Harness，第一个支持的是 **DuMate 桌面端**。
 不用手动改 provider 配置，DuMate 每次启动换端口也不用管。
 
@@ -47,12 +49,13 @@ https://raw.githubusercontent.com/titor-jz/dsh-dumate-gateway/main/market/index.
 
 1. `Plugins` → Experimental plugins → 打开 **Custom plugin indexes**；
 2. 进 **Discover** → **Add index source** → 粘贴上面的 URL；
-3. 选中 **DuMate gateway** → **Install**（从仓库某个固定 commit 安装）。
+3. 选中 **DuMate gateway** → **Install**（从 npm 装 `dsh-dumate-gateway@0.0.1`）。
 
 ### 方式二：直接装
 
-`Plugins` → **Add plugin** → 粘贴 `git+https://github.com/titor-jz/dsh-dumate-gateway.git`，
-或者直接指向本地 checkout 目录。纯宿主 bundle：无构建、无依赖、无安装脚本。
+`Plugins` → **Add plugin** → 粘贴包名 `dsh-dumate-gateway`（走 npm），
+或 `git+https://github.com/titor-jz/dsh-dumate-gateway.git`，或直接指向本地 checkout 目录。
+纯宿主 bundle：无构建、无依赖、无安装脚本。
 
 HTTP 网关随插件启动，地址 `http://127.0.0.1:7321`。
 

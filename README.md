@@ -2,6 +2,8 @@
 
 English | [中文](README.zh.md)
 
+[![npm](https://img.shields.io/npm/v/dsh-dumate-gateway.svg)](https://www.npmjs.com/package/dsh-dumate-gateway) [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Bring locally running OpenAI-compatible model services into DeepSeek Harness — starting with the
 DuMate desktop app — without hand-editing a provider profile for every restart.
 
@@ -64,16 +66,17 @@ https://raw.githubusercontent.com/titor-jz/dsh-dumate-gateway/main/market/index.
 
 1. `Plugins` → **Experimental plugins** → switch on **Custom plugin indexes**.
 2. Open the **Discover** tab → **Add index source** → paste the URL above.
-3. Select **DuMate gateway** → **Install**. It installs from this repository at a pinned commit.
+3. Select **DuMate gateway** → **Install**. It installs `dsh-dumate-gateway@0.0.1` from npm.
 
 Without an index you can still install it directly: `Plugins` → **Add plugin** → paste
-`git+https://github.com/titor-jz/dsh-dumate-gateway.git`, or point the dialog at a local checkout.
+`dsh-dumate-gateway` (npm), or `git+https://github.com/titor-jz/dsh-dumate-gateway.git`, or point the
+dialog at a local checkout.
 
 ## Install
 
-DeepSeek Harness → **Plugins** → **Add plugin** → pick this directory. Host-only bundle: no build
-step, no dependencies, no install scripts. The HTTP gateway starts with the plugin on
-`http://127.0.0.1:7321`.
+DeepSeek Harness → **Plugins** → **Add plugin** → paste `dsh-dumate-gateway` (npm) or pick this
+directory. Host-only bundle: no build step, no dependencies, no install scripts. The HTTP gateway
+starts with the plugin on `http://127.0.0.1:7321`.
 
 ## Use it from other clients
 
