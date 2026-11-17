@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "title": "DuMate 网关",
+    "description": "把本机 OpenAI 兼容的模型服务接进模型选择器，首先支持 DuMate 桌面版。",
+    "detail": "docs/DETAIL.md"
+  },
+  "dumateGateway": {
+    "title": "DuMate 网关",
+    "online": "在线",
+    "offline": "离线",
+    "probing": "探测中",
+    "refresh": "刷新",
+    "copied": "已复制",
+    "unreachable": "连不上本地网关",
+    "offlineHint": "DuMate 没在运行。启动桌面版后，这个面板会在几秒内发现它。",
+    "noModels": "上游在线，但没有报告任何模型。",
+    "port": "客户端网关"
+  }
+}

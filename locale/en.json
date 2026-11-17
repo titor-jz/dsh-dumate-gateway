@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "title": "DuMate gateway",
+    "description": "Adds local OpenAI-compatible model services to the model selector, starting with the DuMate desktop app.",
+    "detail": "docs/DETAIL.md"
+  },
+  "dumateGateway": {
+    "title": "DuMate gateway",
+    "online": "online",
+    "offline": "offline",
+    "probing": "probing",
+    "refresh": "Refresh",
+    "copied": "copied",
+    "unreachable": "The gateway is not reachable",
+    "offlineHint": "DuMate is not running. Start the desktop app and this panel picks it up within seconds.",
+    "noModels": "The upstream is online but reports no models.",
+    "port": "Client gateway"
+  }
+}

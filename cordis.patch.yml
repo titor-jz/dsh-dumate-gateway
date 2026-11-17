@@ -1,0 +1,5 @@
+# dsh-dumate-gateway bundle patch.
+# Only inserts its own row; it never disables or rewrites rows owned by others.
+- insert:
+    - id: dumate-gateway
+      name: 'dsh-dumate-gateway'

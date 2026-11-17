@@ -1,0 +1,57 @@
+{
+  "name": "dsh-dumate-gateway",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Use locally running OpenAI-compatible model services (DuMate first) from DeepSeek Harness. Unofficial, not affiliated with Baidu.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "src",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE",
+    "docs/DETAIL.md",
+    "docs/assets"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ]
+    }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dumate",
+    "gateway",
+    "openai-compatible",
+    "llm"
+  ],
+  "author": "titor-jz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/titor-jz/dsh-dumate-gateway.git"
+  },
+  "homepage": "https://github.com/titor-jz/dsh-dumate-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/titor-jz/dsh-dumate-gateway/issues"
+  }
+}
