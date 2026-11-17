@@ -10,8 +10,9 @@ through the standard harness chunk protocol.
 
 ## Current state
 
-- Registers a `gateway` provider route whose catalog is the live DuMate model table (43 models on the
-  author's install), so those models appear in the model selector with their real context windows.
+- Registers a `gateway` provider route whose catalog is the live DuMate model table, curated to chat
+  models by default (43 raw rows collapse to 17 on the author's install), so those models appear in
+  the model selector with their real context windows.
 - Forwards chat completions to the DuMate proxy with true streaming: reasoning and text arrive as
   separate blocks, usage is reported before the finish chunk.
 - Reads the proxy address from the file DuMate writes on every launch, so a moving port needs no

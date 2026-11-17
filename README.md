@@ -11,8 +11,8 @@ What works today:
 
 - the package installs into a DSH profile as a bundle;
 - the model selector lists the live DuMate model table with real context windows, read from the
-  file DuMate writes on every launch — curated to chat models by default (43 rows on the author's
-  install collapse to 16), with `models.mode: all` to see everything;
+  file DuMate writes on every launch — curated to chat models by default (43 raw rows collapse to
+  17 chat models on the author's install), with `models.mode: all` to see everything;
 - chat completions stream back with reasoning and text as separate blocks, usage before finish;
 - when DuMate is not running, one placeholder model explains how to start it;
 - a loopback HTTP gateway serves the same upstream to ordinary clients;
