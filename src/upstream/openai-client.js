@@ -26,7 +26,7 @@ export async function* streamChatCompletion(options) {
   let usage = null
   let failureCode = null
   try {
-    for await (const event of streamUpstream(options)) {
+    for await (const event of mergeToolCallFragments(streamUpstream(options))) {
       if (event.kind === 'usage') usage = event.usage
       yield event
     }
@@ -44,6 +44,47 @@ export async function* streamChatCompletion(options) {
       ms: Date.now() - startedAt,
     })
   }
+}
+
+/**
+ * Fold one logical tool call back into one event.
+ *
+ * DuMate splits a call over several fragments whose `index` keeps changing: the
+ * id/name arrives as index 0, then the argument JSON pieces arrive as index 1
+ * (or 2, 3…) with no id and no name. Consumers key tool calls by index/id, so
+ * the pieces would surface as extra nameless calls and the arguments would be
+ * lost. Treat a fragment without an id and without a name as a continuation of
+ * the call being assembled, and emit the call once, complete.
+ */
+async function* mergeToolCallFragments(events) {
+  let pending = null
+
+  function* flush() {
+    if (pending === null) return
+    yield { kind: 'tool-call', id: pending.id, name: pending.name, argumentsDelta: pending.args }
+    pending = null
+  }
+
+  for await (const event of events) {
+    if (event.kind !== 'tool-call') {
+      yield* flush()
+      yield event
+      continue
+    }
+
+    const id = event.id ?? ''
+    const name = typeof event.name === 'string' && event.name !== '' ? event.name : undefined
+    if (pending !== null && (id !== '' || name !== undefined)) yield* flush()
+
+    if (pending === null) pending = { id, name, args: '' }
+    else {
+      if (pending.id === '') pending.id = id
+      if (pending.name === undefined) pending.name = name
+    }
+    pending.args += event.argumentsDelta ?? ''
+  }
+
+  yield* flush()
 }
 
 async function* streamUpstream(options) {

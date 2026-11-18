@@ -5,9 +5,22 @@
  * hide rules, and the live section is skipped when no catalog file exists.
  */
 import assert from 'node:assert/strict'
-import { curateEntries, readCatalog } from '../src/upstream/discovery.js'
+import { curateEntries, normalizeBaseURL, readCatalog } from '../src/upstream/discovery.js'
 
 const entry = (key, id = key) => ({ key, model: { id }, preferred: id })
+
+// A host address may arrive as a bare origin (the env var) or as the full proxy
+// URL (the config file); both must end up at the proxy base or requests 401.
+assert.equal(normalizeBaseURL('http://127.0.0.1:52867'), 'http://127.0.0.1:52867/api/qianfanproxy/v1')
+assert.equal(normalizeBaseURL('http://127.0.0.1:52867/'), 'http://127.0.0.1:52867/api/qianfanproxy/v1')
+assert.equal(
+  normalizeBaseURL('http://127.0.0.1:52867/api/qianfanproxy/v1'),
+  'http://127.0.0.1:52867/api/qianfanproxy/v1',
+)
+assert.equal(normalizeBaseURL('https://host.example/api/qianfanproxy/v1/'), 'https://host.example/api/qianfanproxy/v1')
+assert.equal(normalizeBaseURL('ftp://host'), null)
+assert.equal(normalizeBaseURL(''), null)
+assert.equal(normalizeBaseURL(undefined), null)
 
 const synthetic = [
   entry('deepseek-v4-pro'),

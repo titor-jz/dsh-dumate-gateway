@@ -2,18 +2,26 @@
  * Translate the harness's provider-neutral messages into the OpenAI chat
  * completion shape the DuMate proxy speaks.
  *
- * Every content block the proxy cannot represent natively is projected to
- * deterministic text: attachments become a named placeholder, which matches how
- * the harness's first-party adapters keep images and files out of the wire.
+ * Text, tool calls and history map one to one. Images are the one block the
+ * proxy understands but the harness keeps off the wire: when the caller passes
+ * `resolveImage`, a user image is turned into a `data:` URL and sent as
+ * `image_url`; without it (or when the block was offloaded) the block becomes
+ * deterministic placeholder text. Files are never sent.
  */
 
-/** @param {{messages?: readonly any[], system?: string}} options */
-export function toOpenAIMessages({ messages = [], system } = {}) {
+/** @param {{messages?: readonly any[], system?: string, resolveImage?: ((block: any) => Promise<string | null>) | null}} options */
+export async function toOpenAIMessages({ messages = [], system, resolveImage = null } = {}) {
   const output = []
   if (typeof system === 'string' && system !== '') output.push({ role: 'system', content: system })
 
   for (const message of messages) {
     if (message === null || typeof message !== 'object') continue
+
+    if (message.role === 'user') {
+      output.push({ role: 'user', content: await userContent(message.content, resolveImage) })
+      continue
+    }
+
     const text = flatten(message.content)
 
     switch (message.role) {
@@ -24,9 +32,6 @@ export function toOpenAIMessages({ messages = [], system } = {}) {
         // The harness folds tool changes into developer messages; the wire has
         // no equivalent role, so the text joins the system prompt.
         if (text !== '') output.push({ role: 'system', content: text })
-        break
-      case 'user':
-        output.push({ role: 'user', content: text })
         break
       case 'assistant': {
         const toolCalls = toolCallsOf(message.content)
@@ -48,6 +53,60 @@ export function toOpenAIMessages({ messages = [], system } = {}) {
   }
 
   return output
+}
+
+/**
+ * A user message keeps its order: text parts and resolved images interleave the
+ * way they were sent, while blocks the wire cannot carry become text.
+ */
+async function userContent(content, resolveImage) {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+
+  const parts = []
+  let carriesImage = false
+
+  for (const block of content) {
+    if (block === null || typeof block !== 'object') continue
+
+    if (block.type === 'text' && typeof block.text === 'string') {
+      if (block.text !== '') parts.push({ type: 'text', text: block.text })
+      continue
+    }
+
+    if (block.type === 'image') {
+      const url = await imageURL(block, resolveImage)
+      if (url !== null) {
+        parts.push({ type: 'image_url', image_url: { url } })
+        carriesImage = true
+        continue
+      }
+      parts.push({ type: 'text', text: '[image attachment]' })
+      continue
+    }
+
+    if (block.type === 'reasoning') continue
+    if (block.type === 'file') parts.push({ type: 'text', text: '[file attachment]' })
+    else if (block.type === 'tool-call') parts.push({ type: 'text', text: `[tool call ${block.name ?? ''}]` })
+  }
+
+  // Without an image this stays a plain string: the proxy has always seen one,
+  // and a text-only array would only add noise to the wire and the logs.
+  if (!carriesImage) return parts.map(part => part.text).join('')
+  return parts
+}
+
+async function imageURL(block, resolveImage) {
+  if (resolveImage === null || block.offloaded === true) return null
+  const ref = block.attachment
+  if (ref === null || typeof ref !== 'object' || typeof ref.attachmentId !== 'string') return null
+  try {
+    const url = await resolveImage(block)
+    return typeof url === 'string' && url !== '' ? url : null
+  } catch {
+    // A storage problem must degrade to the placeholder, never fail the turn.
+    return null
+  }
 }
 
 /** @param {readonly any[] | undefined} content */

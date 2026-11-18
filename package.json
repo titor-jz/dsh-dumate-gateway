@@ -1,6 +1,6 @@
 {
   "name": "dsh-dumate-gateway",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "description": "Use locally running OpenAI-compatible model services (DuMate first) from DeepSeek Harness. Unofficial, not affiliated with Baidu.",
   "license": "MIT",

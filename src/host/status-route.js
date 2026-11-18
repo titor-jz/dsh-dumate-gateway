@@ -23,6 +23,7 @@ export const STATUS_PATH = '/api/dumate-gateway/status'
  * @param {readonly string[]} [options.modelsExclude]
  * @param {typeof readCatalog} [options.catalog]
  * @param {typeof isReachable} [options.reachable]
+ * @param {{status: () => Promise<object>} | null} [options.headless]
  * @returns {() => Promise<object>} reads one status snapshot.
  */
 export function createStatusReader({
@@ -31,18 +32,23 @@ export function createStatusReader({
   modelsExclude = [],
   catalog = readCatalog,
   reachable = isReachable,
+  headless = null,
 }) {
   return async function readStatus() {
+    // Headless state is cheap (two TCP probes) and the panel needs it even when
+    // the catalog read fails, so it is resolved before either branch.
+    const headlessInfo = headless === null ? undefined : await headless.status().catch(() => undefined)
+
     let snapshot
     try {
       snapshot = await catalog({ mode: modelsMode, exclude: modelsExclude })
     } catch (error) {
       // No DuMate state at all: the panel shows its "start the app" empty state
       // instead of an error, so report a well-formed offline payload.
-      return offline(version, modelsMode, error instanceof Error ? error.message : String(error))
+      return offline(version, modelsMode, error instanceof Error ? error.message : String(error), headlessInfo)
     }
     const baseURL = typeof snapshot?.baseURL === 'string' ? snapshot.baseURL : null
-    if (baseURL === null) return offline(version, modelsMode, 'the DuMate state file has no base URL yet')
+    if (baseURL === null) return offline(version, modelsMode, 'the DuMate state file has no base URL yet', headlessInfo)
     const online = await reachable(baseURL)
     const models = Array.isArray(snapshot.models) ? snapshot.models : []
     const configPath = typeof snapshot.configPath === 'string' ? snapshot.configPath : undefined
@@ -58,17 +64,19 @@ export function createStatusReader({
       },
       models: models.map(toWireModel),
       usage: usageSnapshot(),
+      ...(headlessInfo === undefined ? {} : { headless: headlessInfo }),
     }
   }
 }
 
-function offline(version, modelsMode, reason) {
+function offline(version, modelsMode, reason, headlessInfo) {
   return {
     ok: true,
     gateway: { version, upstream: 'dumate', models_mode: modelsMode },
     upstream: { name: 'dumate', baseURL: null, online: false, models: 0 },
     models: [],
     ...(reason === undefined ? {} : { reason }),
+    ...(headlessInfo === undefined ? {} : { headless: headlessInfo }),
   }
 }
 

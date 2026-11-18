@@ -10,7 +10,7 @@
  */
 import { GatewayError, llmFailure } from './failure.js'
 import { toOpenAIMessages, toOpenAITools } from './messages.js'
-import { readCatalog } from './upstream/discovery.js'
+import { invalidateCatalog, readCatalog, setBaseURLOverride } from './upstream/discovery.js'
 import { isReachable } from './upstream/health.js'
 import { streamChatCompletion } from './upstream/openai-client.js'
 
@@ -20,12 +20,25 @@ const DISPLAY_NAME = 'DuMate gateway'
 const PLACEHOLDER_ID = 'hello'
 const PLACEHOLDER_TEXT = [
   'The DuMate gateway has no live model catalog yet.',
-  'Start the DuMate desktop app and reopen the model selector; the gateway reads its catalog from the running app.',
+  'Start the DuMate desktop app, or press Start headless in the DuMate panel (headless mode starts nothing by itself), and reopen the model selector; the gateway reads its catalog from the installed app.',
 ].join(' ')
 
 export class GatewayAdapter {
-  constructor(config = {}) {
+  /**
+   * @param {Record<string, any>} [config] - the plugin row's config.
+   * @param {{
+   *   headless?: {ensure: () => Promise<string | null>} | null,
+   *   images?: ((block: any) => Promise<string | null>) | null,
+   * }} [options]
+   *   `headless` starts the two DuMate background binaries when the desktop app
+   *   is not running; the adapter only asks it for a base URL, it never spawns.
+   *   `images` turns one harness image block into a `data:` URL; when it is
+   *   absent the block degrades to placeholder text.
+   */
+  constructor(config = {}, options = {}) {
     this.config = config
+    this.headless = options.headless ?? null
+    this.images = options.images ?? null
     const models = config.models ?? {}
     this.modelsMode = models.mode === 'all' ? 'all' : 'curated'
     this.modelsExclude = Array.isArray(models.exclude)
@@ -90,23 +103,20 @@ export class GatewayAdapter {
       return
     }
 
-    const catalog = this.catalog()
+    const catalog = await this.reachableCatalog()
     if (catalog === null) {
       throw new GatewayError(llmFailure('DISCOVERY_FAILED', 'No DuMate catalog was found. Start the DuMate desktop app.'))
-    }
-
-    if (this.config.requireReachable !== false) {
-      const reachable = await isReachable(catalog.baseURL)
-      if (!reachable) {
-        throw new GatewayError(llmFailure('TRANSPORT', `The DuMate proxy at ${catalog.baseURL} is not accepting connections.`))
-      }
     }
 
     const events = streamChatCompletion({
       baseURL: catalog.baseURL,
       apiKey: catalog.apiKey,
       model: resolved.id,
-      messages: toOpenAIMessages({ messages: options.messages, system: options.system }),
+      messages: await toOpenAIMessages({
+        messages: options.messages,
+        system: options.system,
+        resolveImage: this.images,
+      }),
       tools: toOpenAITools(options.tools),
       temperature: options.temperature,
       maxTokens: options.maxTokens,
@@ -120,6 +130,46 @@ export class GatewayAdapter {
 
   catalog() {
     return readCatalog({ mode: this.modelsMode, exclude: this.modelsExclude })
+  }
+
+  /**
+   * The catalog, with one headless start attempted when the proxy is not there.
+   *
+   * A cold start takes a few seconds, which is exactly why it happens on a chat
+   * request rather than on every listing: the model picker must stay instant.
+   */
+  async reachableCatalog() {
+    let catalog = this.catalog()
+
+    if (catalog === null) {
+      await this.tryHeadless()
+      return this.catalog()
+    }
+
+    if (this.config.requireReachable === false) return catalog
+    if (await isReachable(catalog.baseURL)) return catalog
+
+    await this.tryHeadless()
+    const recovered = this.catalog()
+    if (recovered !== null && await isReachable(recovered.baseURL)) return recovered
+
+    const shown = recovered ?? catalog
+    throw new GatewayError(llmFailure('TRANSPORT', `The DuMate proxy at ${shown.baseURL} is not accepting connections.`))
+  }
+
+  /** Ask headless mode for a base URL and point discovery at it. Never throws. */
+  async tryHeadless() {
+    if (this.headless === null) return null
+    let baseURL = null
+    try {
+      baseURL = await this.headless.ensure()
+    } catch {
+      return null
+    }
+    if (baseURL === null) return null
+    setBaseURLOverride(baseURL)
+    invalidateCatalog()
+    return baseURL
   }
 }
 

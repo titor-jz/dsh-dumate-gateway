@@ -18,6 +18,13 @@ What works today:
   file DuMate writes on every launch — curated to chat models by default (43 raw rows collapse to
   17 chat models on the author's install), with `models.mode: all` to see everything;
 - chat completions stream back with reasoning and text as separate blocks, usage before finish;
+- function calling passes through: `tools` go upstream and a `tool_calls` reply is folded back into
+  one call per tool, even though DuMate splits a call over several SSE fragments with drifting
+  indices (see `docs/DETAIL.md`);
+- image input works for the models that accept it: an attached image is read from DSH's
+  attachment service and sent as an `image_url` part, so a vision model really sees the picture
+  (the harness otherwise only hands adapters an opaque id, and images used to reach DuMate as
+  `[image attachment]` text);
 - when DuMate is not running, one placeholder model explains how to start it;
 - a loopback HTTP gateway serves the same upstream to ordinary clients;
 - a right-sidebar panel is a small dashboard: upstream status, today's tokens with an in/out
@@ -30,7 +37,11 @@ What works today:
   lives in the page's `localStorage`, not in that file;
 - a **one-click Probe** answers "is it connected right now?" with a 16-token ping, reporting the
   model it reached and first-token/total latency — or the exact reason it failed, without spending
-  a real completion.
+  a real completion;
+- **headless mode** starts only the two DuMate binaries the gateway needs — about 59 MB instead of
+  a gigabyte — and starts nothing until a person presses **Start headless**; stopping it kills a
+  pid only after confirming that pid still runs the DuMate image, and a panel warning appears when
+  the desktop app and these two processes are up at once, since both write one data directory.
 
 ![The DuMate gateway panel in the DSH right sidebar](docs/assets/sidebar-panel.png)
 
@@ -66,7 +77,7 @@ https://raw.githubusercontent.com/titor-jz/dsh-dumate-gateway/main/market/index.
 
 1. `Plugins` → **Experimental plugins** → switch on **Custom plugin indexes**.
 2. Open the **Discover** tab → **Add index source** → paste the URL above.
-3. Select **DuMate gateway** → **Install**. It installs `dsh-dumate-gateway@0.0.1` from npm.
+3. Select **DuMate gateway** → **Install**. It installs `dsh-dumate-gateway@0.0.2` from npm.
 
 Without an index you can still install it directly: `Plugins` → **Add plugin** → paste
 `dsh-dumate-gateway` (npm), or `git+https://github.com/titor-jz/dsh-dumate-gateway.git`, or point the
@@ -114,6 +125,34 @@ Set `http.token` in the plugin config to require `Authorization: Bearer <token>`
 on every route except CORS preflight. The gateway only listens on `127.0.0.1`, and only echoes CORS
 for loopback origins, so the DSH web UI can read it without opening the port to the network.
 
+## Run without the DuMate window (headless)
+
+The desktop app is an Electron shell around two binaries that do the real work. This gateway needs
+only those two, so it can start them itself — **2 processes and about 59 MB instead of 14 processes
+and about a gigabyte** — with the window never opening. Streaming behaves exactly the same.
+
+```yaml
+headless:
+  enabled: true         # offer the panel's Start button, and start on load
+  autoStart: false      # true → start it on plugin load; false → only the button does
+  baseProxyPort: 53231  # any two free loopback ports
+  mainServerPort: 53232
+  stopOnUnload: false   # true → unloading the plugin also stops the backend
+```
+
+What it does, and what it deliberately does not:
+
+- it reuses the account you already signed in with, by reading `auth.json` — it never asks for
+  credentials and cannot work on a machine that never signed in to DuMate;
+- it starts `dumate-base-proxy.exe` and `dumate-main-server.exe` from the installed app, with the
+  working directory the backend expects; nothing is downloaded, patched or modified;
+- it does nothing while the desktop app is running: the app wins, and headless owns separate ports;
+- a failed start is not retried on every message (one attempt per minute at most), so a chat retry
+  never becomes a spawn storm.
+
+Start or stop it from the panel card; nothing is launched on page load or on the first chat request unless `autoStart` is set to `true`. The two log files
+land in `~/.dsh/dumate-gateway/logs`; errors from a failed start are shown in the panel verbatim.
+
 ## Configuration
 
 ```yaml
@@ -125,6 +164,12 @@ requireReachable: true   # false → forward even when the TCP probe fails
 models:
   mode: curated          # curated (chat models only) | all (raw table, DuMate internals included)
   exclude: []            # extra keys to hide, case-insensitive substring match
+headless:
+  enabled: false         # true → the panel can start DuMate's two background binaries
+  autoStart: false
+  baseProxyPort: 53231
+  mainServerPort: 53232
+  stopOnUnload: false
 ```
 
 DuMate mixes its public chat models with internal plumbing (routing helpers, validators, embeddings,

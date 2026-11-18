@@ -21,6 +21,7 @@ window.__ModuleLoader__.load({
     const GATEWAY = 'http://127.0.0.1:7321'
     const STATUS = '/api/dumate-gateway/status'
     const TRY = '/api/dumate-gateway/try'
+    const HEADLESS = '/api/dumate-gateway/headless'
     const REFRESH_MS = 15000
     const NS = 'dumateGateway'
     const FAVORITES_KEY = 'dsh.dumate-gateway.favorites.v1'
@@ -152,6 +153,13 @@ window.__ModuleLoader__.load({
       modelName: { flex: '1 1 auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
       dim: { opacity: 0.55, fontSize: '10.5px', whiteSpace: 'nowrap' },
       empty: { font: 'inherit', fontSize: '11.5px', opacity: 0.7, lineHeight: 1.6, margin: 0 },
+      warn: {
+        font: 'inherit',
+        fontSize: '11.5px',
+        lineHeight: 1.6,
+        margin: 0,
+        color: '#d97706',
+      },
       detailsRow: {
         display: 'grid',
         gridTemplateColumns: '72px 1fr',
@@ -538,6 +546,56 @@ window.__ModuleLoader__.load({
       h('circle', { cx: last[0], cy: last[1], r: 2.1, fill: ACCENT }))
     }
 
+    /**
+     * The offline card that offers to start the two background processes.
+     *
+     * Pure, so the registration test can render each of its three shapes without
+     * a live gateway: not running, starting, and unable to sign in.
+     */
+    function HeadlessCard({ headless, busy, error, onStart, onStop }) {
+      if (headless === null || headless === undefined) return null
+      return h(Card, null,
+        h('div', { style: styles.cardHead },
+          h('p', { style: styles.label }, headless.running ? 'Headless DuMate' : 'DuMate is not running'),
+          h('span', { style: styles.spacer }),
+          headless.running
+            ? h('button', {
+              type: 'button',
+              style: styles.ghost,
+              disabled: busy,
+              title: 'Stop the two background processes this plugin started',
+              onClick: onStop,
+            }, busy ? 'Stopping…' : 'Stop')
+            : h('button', {
+              type: 'button',
+              style: {
+                ...styles.ghost,
+                borderColor: ACCENT,
+                color: ACCENT,
+                opacity: busy ? 0.55 : 1,
+              },
+              disabled: busy,
+              title: 'Start the two DuMate background processes without the desktop window',
+              onClick: onStart,
+            }, busy ? 'Starting…' : 'Start headless')),
+        headless.running
+          ? h('p', { style: styles.meta },
+            'Two background processes are serving this gateway. The desktop window is not needed; memory stays around 60 MB instead of a gigabyte.')
+          : h('p', { style: styles.meta },
+            'Start only the two DuMate binaries this gateway needs — about 59 MB instead of the full app. The window stays closed.'),
+        // Both backends up at once is the one state worth flagging: the desktop
+        // app and these two processes write the same data directory, and nobody
+        // has verified what DuMate does when that happens. Warn, never act.
+        headless.running === true && typeof headless.desktopBaseURL === 'string'
+          ? h('p', { style: styles.warn },
+            `The DuMate desktop app is also running (${headless.desktopBaseURL}). Two backends share one data directory — close one of them to avoid trouble.`)
+          : null,
+        headless.signedIn === false
+          ? h('p', { style: styles.empty }, 'Sign in to the DuMate app once first: headless mode reads the account it stored.')
+          : null,
+        error === null || error === undefined ? null : h('p', { style: styles.empty }, error))
+    }
+
     // ------------------------------------------------------------------ panel
 
     function Panel() {
@@ -554,6 +612,9 @@ window.__ModuleLoader__.load({
         model: '',
         attempt: null,
         probe: null,
+        headless: null,
+        headlessBusy: false,
+        headlessError: null,
         latency: [],
         showModels: false,
         showDetails: false,
@@ -605,6 +666,7 @@ window.__ModuleLoader__.load({
             phase: 'ready',
             health,
             models,
+            headless: health?.headless ?? null,
             error: null,
             readAt: new Date(),
           }))
@@ -741,6 +803,41 @@ window.__ModuleLoader__.load({
         // otherwise the callback keeps the first render's (null) health forever.
       }, [state.model, state.probe, state.health, load])
 
+      /**
+       * Headless mode: the two DuMate binaries without the Electron window.
+       *
+       * The panel only ever asks for an action — the host decides what starting
+       * means. When `headless.autoStart` is on, the plugin has usually started it
+       * already and this button just reports the state.
+       */
+      const callHeadless = React.useCallback(async action => {
+        if (state.headlessBusy) return
+        setState(prev => ({ ...prev, headlessBusy: true, headlessError: null }))
+        try {
+          const response = await fetch(HEADLESS, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify({ action }),
+          })
+          const payload = await response.json().catch(() => null)
+          if (!response.ok || payload?.ok !== true) {
+            throw new Error(payload?.message ?? `headless route returned ${response.status}`)
+          }
+          if (alive.current) {
+            setState(prev => ({ ...prev, headless: payload.headless ?? prev.headless }))
+          }
+        } catch (error) {
+          if (alive.current) {
+            setState(prev => ({
+              ...prev,
+              headlessError: error instanceof Error ? error.message : String(error),
+            }))
+          }
+        }
+        if (alive.current) setState(prev => ({ ...prev, headlessBusy: false }))
+        load()
+      }, [state.headlessBusy, load])
+
       const query = state.query.trim().toLowerCase()
       const matches = query.length === 0
         ? state.models
@@ -757,6 +854,7 @@ window.__ModuleLoader__.load({
 
       const health = state.health
       const online = health?.upstream?.online ?? null
+      const headlessState = state.headless
       const gatewayUp = health?.gateway?.version !== undefined
       const total = health?.upstream?.models ?? state.models.length
       const reason = typeof health?.reason === 'string' ? health.reason : null
@@ -785,6 +883,7 @@ window.__ModuleLoader__.load({
           h(Dot, { online }),
           h('p', { style: styles.statusText }, statusLabel),
           online === true ? h('span', { style: styles.chip }, `${total} models`) : null,
+          headlessState?.running === true ? h('span', { style: styles.chip }, 'headless') : null,
           h('span', { style: styles.spacer }),
           h('span', { style: styles.dim }, gatewayUp ? `v${health.gateway.version}` : ''),
           refresh),
@@ -800,6 +899,20 @@ window.__ModuleLoader__.load({
               '. Make sure DSH runs and the plugin is enabled.'),
             h('p', { style: { ...styles.empty, ...styles.mono } }, state.error ?? ''),
             h('div', { style: styles.actions }, refresh))
+          : null,
+
+        // ------------------------------------------------------ headless prompt
+        // Shown when the gateway is offline (offer to start) and also while a
+        // headless backend is serving (offer to stop it), never merely because
+        // the desktop app is running.
+        (online === false || headlessState?.running === true) && headlessState !== null
+          ? h(HeadlessCard, {
+            headless: headlessState,
+            busy: state.headlessBusy,
+            error: state.headlessError,
+            onStart: () => callHeadless('start'),
+            onStop: () => callHeadless('stop'),
+          })
           : null,
 
         // ------------------------------------------------------------ usage card
@@ -964,7 +1077,7 @@ window.__ModuleLoader__.load({
               }),
               state.models.length === 0
                 ? h('p', { style: styles.empty }, online === false
-                  ? 'DuMate is not running. Start the desktop app; this panel follows within 15 seconds.'
+                  ? 'DuMate is not running. Start it with the button at the top, or open the desktop app; this panel follows within 15 seconds.'
                   : 'The upstream is online but reports no models.')
                 : null,
               ordered.length === 0 && state.models.length > 0
@@ -1013,6 +1126,11 @@ window.__ModuleLoader__.load({
               h('span', { style: { ...styles.detailsValue, ...styles.mono } }, `${GATEWAY} · v${health?.gateway?.version ?? '?'}`),
               h('span', { style: styles.detailsKey }, 'models'),
               h('span', { style: styles.detailsValue }, `${total} · mode ${modelsMode ?? '?'}`),
+              h('span', { style: styles.detailsKey }, 'headless'),
+              h('span', { style: styles.detailsValue },
+                headlessState === null
+                  ? 'off'
+                  : `${headlessState.running ? 'running' : 'stopped'} · ports ${headlessState.baseProxyPort}/${headlessState.mainServerPort}`),
               h('span', { style: styles.detailsKey }, 'state file'),
               h('span', { style: { ...styles.detailsValue, ...styles.mono }, title: configPath ?? '' }, configPath ?? '—'),
               reason === null ? null : h('span', { style: styles.detailsKey }, 'reason'),
@@ -1045,6 +1163,10 @@ window.__ModuleLoader__.load({
             description: () => 'Upstream status and the models it offers',
           }],
         }), 'dumate-gateway: sidebar tab type')
+
+        // The registration test renders the offline card in each of its shapes;
+        // exposing it keeps that test honest without a live gateway.
+        Panel.HeadlessCard = HeadlessCard
 
         ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab',

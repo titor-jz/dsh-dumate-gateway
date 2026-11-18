@@ -14,11 +14,14 @@
 - 作为 bundle 装进 DSH 的 profile；
 - 模型选择器里直接出现 DuMate 的**实时模型表**，带真实上下文窗口，默认只留对话模型（作者这台机器 43 条原始记录筛成 17 条），想看全部就把 `models.mode` 设成 `all`；
 - 对话真流式：推理块和正文字块分开到达，`usage` 在结束块之前给出；
+- 函数调用（tool calls）可透传：`tools` 原样发给上游，返回的 `tool_calls` 会被折回「一个工具一个调用」——DuMate 会把一次调用拆成多个 SSE 分片且 `index` 会漂移，插件负责合并（见 `docs/DETAIL.md`）；
+- 图片输入对支持视觉的模型真的可用：附件从 DSH 的 attachment 服务取出，按 `image_url` 发给上游，模型能看到图——否则宿主只给适配器一个不透明 id，图片过去只会变成 `[image attachment]` 文本；
 - DuMate 没启动时，只给一个 `Hello` 占位模型，提示你去启动它；
 - 另起一个只绑 `127.0.0.1` 的 HTTP 网关，普通客户端也能用（OpenAI 形状，外加最小 Anthropic 形状）；
 - 右侧栏面板是一个小仪表盘：上游状态、今日 token（in/out 占比条 + 7 日成对柱状图）、首字延迟走势、试聊框、一键探针、复制按钮，外加两个默认折叠的抽屉（模型列表、诊断信息）；数据走宿主**同源** `/api/dumate-gateway/status`，15 秒刷新一次，不碰跨域；
 - 面板可以发**一条很小的测试消息**（下拉选模型），并记本地用量：今天的请求数、in/out token、错误数，写在 `~/.dsh/dumate-gateway/usage.json`，保留 7 天，不外发；
-- **一键 Probe**：16 token 的 ping，直接回答「现在通不通」，报告命中的模型和首字/总耗时，失败时给出确切原因，不浪费一次正式生成。
+- **一键 Probe**：16 token 的 ping，直接回答「现在通不通」，报告命中的模型和首字/总耗时，失败时给出确切原因，不浪费一次正式生成；
+- **headless 模式**：只启动网关需要的两个 DuMate 二进制，约 59 MB 而不是一个多 G；默认不会自己启动，必须由你按 **Start headless** 才开始。停止时先确认该 pid 仍运行 DuMate 的镜像才结束进程；如果桌面端和这两个后台进程同时在线，面板会给出警告（两者共用一个数据目录）。
 
 ![DuMate gateway 面板](docs/assets/sidebar-panel.png)
 
@@ -49,7 +52,7 @@ https://raw.githubusercontent.com/titor-jz/dsh-dumate-gateway/main/market/index.
 
 1. `Plugins` → Experimental plugins → 打开 **Custom plugin indexes**；
 2. 进 **Discover** → **Add index source** → 粘贴上面的 URL；
-3. 选中 **DuMate gateway** → **Install**（从 npm 装 `dsh-dumate-gateway@0.0.1`）。
+3. 选中 **DuMate gateway** → **Install**（从 npm 装 `dsh-dumate-gateway@0.0.2`）。
 
 ### 方式二：直接装
 
@@ -83,6 +86,30 @@ Anthropic 形状的客户端（比如把 Claude Code 指过来）可以调 `POST
 
 代价：DSH 会用自己的 pi-ai 适配器访问网关，而不是本插件的适配器，选择器里会出现两个分组。日常用插件那组，这一行只是给「想在那个页面里管理」的人。
 
+## 不开 DuMate 窗口也能用（headless）
+
+DuMate 桌面端是套在两个真正干活的二进制外面的 Electron 壳。本网关只需要那两个，所以可以自己把它们拉起来——
+**2 个进程、约 59 MB，而不是 14 个进程、1 GB 左右**，窗口全程不打开。流式表现完全一样。
+
+```yaml
+headless:
+  enabled: true         # 面板出现「Start headless」按钮，并在加载时自动启动
+  autoStart: false      # true → 插件加载时自动起；false → 只有点按钮才起
+  baseProxyPort: 53231  # 随便两个空闲回环端口
+  mainServerPort: 53232
+  stopOnUnload: false   # true → 卸载插件时一并停掉后端
+```
+
+它做什么、以及刻意不做什么：
+
+- 复用你已经登录的账号：只读 `auth.json`，**不会要求输入凭据**；从没登录过 DuMate 的机器用不了；
+- 从已安装的 DuMate 里起 `dumate-base-proxy.exe` 与 `dumate-main-server.exe`，工作目录设成后端期望的位置；不下载、不修改任何文件；
+- 桌面端开着时它什么都不做：桌面端优先，headless 用自己独立的端口；
+- 启动失败不会按每条消息重试（最多每分钟一次），所以聊天重试不会变成进程风暴。
+
+面板上的卡片可以直接 Start / Stop；插件加载时、第一次聊天时都不会自己拉起进程，除非把 `autoStart` 显式设成 `true`。两个日志在
+`~/.dsh/dumate-gateway/logs`，启动失败的原因会原样显示在面板里。
+
 ## 配置
 
 ```yaml
@@ -94,6 +121,12 @@ requireReachable: true   # false → TCP 探测失败也转发
 models:
   mode: curated          # curated（只留对话模型）| all（原始表，含 DuMate 内部件）
   exclude: []            # 额外隐藏，按 key 大小写不敏感子串匹配
+headless:
+  enabled: false         # true → 面板可启动 DuMate 的两个后台二进制
+  autoStart: false
+  baseProxyPort: 53231
+  mainServerPort: 53232
+  stopOnUnload: false
 ```
 
 DuMate 把公开对话模型和内部管线混在一张表里（路由助手、校验器、embedding、OCR、六档自动路由）。`curated` 会把它们藏起来；**隐藏不等于禁用** —— 你手写的 id 照样转发。

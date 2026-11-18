@@ -170,6 +170,77 @@ const probeButton = buttons.find(button => button.children?.[0] === 'Probe')
 assert.ok(probeButton, 'the try card offers a one-click connection probe')
 assert.equal(probeButton.props.type, 'button')
 
+// The offline card: the one place the panel offers to start the two
+// background processes. Rendered pure so each shape is checked directly.
+const Panel = slot.Component
+const offlineShape = (overrides) => {
+  const nodes = []
+  walk(Panel.HeadlessCard({
+    headless: { enabled: true, running: false, signedIn: true, ...overrides },
+    busy: false,
+    error: null,
+    onStart: () => nodes.push('start'),
+    onStop: () => nodes.push('stop'),
+  }), node => {
+    if (node.type === 'button') nodes.push(node)
+  })
+  return nodes
+}
+const startNodes = offlineShape({})
+const startButton = startNodes.find(node => node?.children?.[0] === 'Start headless')
+assert.ok(startButton, 'an offline panel offers to start headless mode')
+assert.equal(startButton.props.type, 'button')
+startButton.props.onClick()
+assert.ok(startNodes.includes('start'), 'the start button calls the route')
+
+const stopNodes = offlineShape({ running: true })
+const stopButton = stopNodes.find(node => node?.children?.[0] === 'Stop')
+assert.ok(stopButton, 'a running headless backend can be stopped from the panel')
+stopButton.props.onClick()
+assert.ok(stopNodes.includes('stop'))
+
+const signedOut = []
+walk(Panel.HeadlessCard({
+  headless: { enabled: true, running: false, signedIn: false },
+  busy: false,
+  error: null,
+  onStart: () => {},
+  onStop: () => {},
+}), node => {
+  if (typeof node.children?.[0] === 'string') signedOut.push(node.children[0])
+})
+assert.ok(signedOut.some(text => /sign in/i.test(text)), 'an unsigned account is told to sign in first')
+
+// Both backends at once: the card warns and never tries to fix it itself.
+const bothUp = []
+walk(Panel.HeadlessCard({
+  headless: { enabled: true, running: true, signedIn: true, desktopBaseURL: 'http://127.0.0.1:52274/api/qianfanproxy/v1' },
+  busy: false,
+  error: null,
+  onStart: () => {},
+  onStop: () => {},
+}), node => {
+  if (typeof node.children?.[0] === 'string') bothUp.push(node.children[0])
+})
+assert.ok(bothUp.some(text => /desktop app is also running/i.test(text)),
+  'a second backend over the same data directory is called out')
+
+const singleBackend = []
+walk(Panel.HeadlessCard({
+  headless: { enabled: true, running: true, signedIn: true, desktopBaseURL: null },
+  busy: false,
+  error: null,
+  onStart: () => {},
+  onStop: () => {},
+}), node => {
+  if (typeof node.children?.[0] === 'string') singleBackend.push(node.children[0])
+})
+assert.equal(singleBackend.some(text => /desktop app is also running/i.test(text)), false,
+  'no warning when only the headless backend serves')
+
+assert.equal(Panel.HeadlessCard({ headless: null, busy: false, error: null }), null,
+  'with headless disabled the card stays off screen')
+
 assert.equal(disposers.length, 2, 'both registrations must return a disposer')
 
 console.log('client plugin: registrations and render ok')

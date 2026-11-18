@@ -31,6 +31,31 @@ const CURATED_HIDDEN = [
 
 let cache = { at: 0, value: null }
 
+/**
+ * A base URL that wins over the live state file.
+ *
+ * Headless mode starts the backend on ports this plugin chose, so the file the
+ * desktop app wrote points at a dead port. The override lets the catalog keep
+ * coming from that file — which is where the model table lives — while requests
+ * go to the instance we started.
+ */
+let baseURLOverride = null
+
+export function setBaseURLOverride(url) {
+  if (url === baseURLOverride) return
+  baseURLOverride = typeof url === 'string' && url !== '' ? url : null
+  cache = { at: 0, value: null }
+}
+
+export function clearBaseURLOverride() {
+  setBaseURLOverride(null)
+}
+
+/** Force the next read to hit the file again. */
+export function invalidateCatalog() {
+  cache = { at: 0, value: null }
+}
+
 /** Where DuMate keeps per-install state: `%APPDATA%\qianfan-desktop-app\qianfan_desk_xdg\<hash>`. */
 export function stateRoots() {
   const appData = process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming')
@@ -64,6 +89,7 @@ export function liveConfigPath(roots = stateRoots()) {
  * @returns {null | {
  *   configPath: string,
  *   baseURL: string,
+ *   fileBaseURL: string | null,
  *   apiKey: string | null,
  *   models: Array<{id: string, name: string, inputModalities: string[], contextWindow?: number, maxTokens?: number}>,
  * }}
@@ -72,7 +98,7 @@ export function readCatalog({ force = false, mode = 'curated', exclude = [] } = 
   const raw = loadRaw({ force })
   if (raw === null) return null
   const models = curateEntries(raw.entries, { mode, exclude })
-  return { configPath: raw.configPath, baseURL: raw.baseURL, apiKey: raw.apiKey, models }
+  return { configPath: raw.configPath, baseURL: raw.baseURL, fileBaseURL: raw.fileBaseURL, apiKey: raw.apiKey, models }
 }
 
 /** Parse the live file into key→model entries; cached briefly because the picker asks often. */
@@ -95,7 +121,11 @@ function loadRaw({ force = false } = {}) {
   }
 
   const provider = json?.provider?.QianfanPersonalQuota ?? Object.values(json?.provider ?? {})[0]
-  const baseURL = normalizeBaseURL(process.env.DUMATE_HOST_URL ?? provider?.options?.baseURL)
+  // Two distinct URLs: what the desktop app last wrote into its state file (the
+  // only pointer to a running app) and what requests actually go to (which the
+  // headless override may redirect to a backend this plugin started).
+  const fileBaseURL = normalizeBaseURL(provider?.options?.baseURL)
+  const baseURL = normalizeBaseURL(process.env.DUMATE_HOST_URL ?? baseURLOverride ?? provider?.options?.baseURL)
   if (baseURL === null) {
     cache = { at: now, value: null }
     return null
@@ -113,7 +143,7 @@ function loadRaw({ force = false } = {}) {
     preferred: typeof model?.id === 'string' && model.id !== '' ? model.id : key,
   }))
 
-  const value = { configPath, baseURL, apiKey, entries }
+  const value = { configPath, baseURL, fileBaseURL, apiKey, entries }
   cache = { at: now, value }
   return value
 }
@@ -170,13 +200,25 @@ function modelEntry(id, model, key) {
   }
 }
 
-/** Drop the trailing `/` so request paths concatenate predictably. */
-function normalizeBaseURL(url) {
+const PROXY_PATH = '/api/qianfanproxy/v1'
+
+/**
+ * Accept both shapes of a host address — the bare origin callers put in
+ * `DUMATE_HOST_URL`, and the full proxy URL the config file carries — and always
+ * return the proxy base. They are not interchangeable: the origin alone points
+ * requests at `/chat/completions` on the app server, which answers 401.
+ *
+ * @param {string | null | undefined} url
+ * @returns {string | null}
+ */
+export function normalizeBaseURL(url) {
   if (typeof url !== 'string' || url === '') return null
   try {
     const parsed = new URL(url)
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
-    return parsed.toString().replace(/\/+$/, '')
+    const path = parsed.pathname.replace(/\/+$/, '')
+    if (path === '') return `${parsed.origin}${PROXY_PATH}`
+    return `${parsed.origin}${path}`
   } catch {
     return null
   }
