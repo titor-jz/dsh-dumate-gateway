@@ -70,10 +70,17 @@ false so a DSH restart does not kill the backend you are using.
 
 Two safety rules keep it from doing damage:
 
-- `stop()` kills a pid from the state file only after `Get-Process -Id <pid>` reports an image name
-  containing `dumate-main-server` or `dumate-base-proxy`. Windows recycles pids, and killing an
-  unrelated process tree is worse than leaving one behind; a pid that is already gone counts as a
-  match so the `taskkill` fails harmlessly.
+- `stop()` kills a pid only after `Get-Process -Id <pid>` reports an image name containing
+  `dumate-main-server` or `dumate-base-proxy`. Windows recycles pids, and killing an unrelated
+  process tree is worse than leaving one behind; a pid that is already gone counts as a match so
+  the `taskkill` fails harmlessly.
+- **the pid worth killing is the listener, not the launcher.** Both binaries start through a
+  one-line `cmd /c` wrapper (the wrapper is what carries the per-launch environment), and that
+  wrapper exits as soon as it has handed off, so the pid `Win32_Process.Create` returns is already
+  dead a moment later. `stop()` therefore also resolves whoever is listening on the two configured
+  ports through `netstat -ano`, still gated on the image name, and the state file records the
+  listening pid when one is visible. Fixed in 0.0.6, after a real run reported `stop` succeeded
+  while both processes were still up — 2 processes and ~59 MB that the panel said were gone.
 - the desktop app and these two processes share one data directory, and nobody has verified what
   DuMate does when both are up. `status()` therefore reports `desktopBaseURL` when the app's own
   endpoint answers (probed at the URL the app wrote to its state file, not at the headless
