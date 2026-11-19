@@ -13,6 +13,7 @@ import { toOpenAIMessages, toOpenAITools } from './messages.js'
 import { invalidateCatalog, readCatalog, setBaseURLOverride } from './upstream/discovery.js'
 import { isReachable } from './upstream/health.js'
 import { streamChatCompletion } from './upstream/openai-client.js'
+import { reasoningInfoFor, thinkingPayload } from './reasoning.js'
 
 export const PROVIDER = 'gateway'
 
@@ -77,11 +78,16 @@ export class GatewayAdapter {
       return { provider, id: model, name: model }
     }
 
+    // Every live model takes the same `thinking` switch; the per-model lists in
+    // `reasoning.js` only differ where a model refuses or ignores "off".
+    const reasoning = reasoningInfoFor(found.id)
+
     return {
       provider,
       id: found.id,
       name: found.name,
       inputModalities: found.inputModalities,
+      ...(reasoning === undefined ? {} : { reasoning }),
       ...(found.contextWindow === undefined ? {} : { context: { contextWindow: found.contextWindow } }),
       ...(found.maxTokens === undefined ? {} : { defaultMaxTokens: found.maxTokens }),
     }
@@ -121,6 +127,7 @@ export class GatewayAdapter {
       temperature: options.temperature,
       maxTokens: options.maxTokens,
       stop: options.stop,
+      thinking: thinkingPayload(options.reasoningEffort),
       signal: options.signal,
       kind: 'dsh',
     })

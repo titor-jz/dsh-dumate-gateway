@@ -15,6 +15,9 @@ through the standard harness chunk protocol.
   the model selector with their real context windows.
 - Forwards chat completions to the DuMate proxy with true streaming: reasoning and text arrive as
   separate blocks, usage is reported before the finish chunk.
+- Exposes a thinking level (Off / On) for the models that support it, mapped onto DuMate's single
+  `thinking: {type: 'disabled' | 'enabled'}` switch rather than onto `reasoning_effort`, which the
+  proxy accepts and ignores (see "Thinking control" below).
 - Reads the proxy address from the file DuMate writes on every launch, so a moving port needs no
   configuration.
 - When DuMate is not running at all, the catalog falls back to a single placeholder model that
@@ -37,13 +40,29 @@ The desktop app is a shell around two binaries. Starting those two directly is e
 gateway — verified on DuMate 1.0.92 with the app fully closed: non-streaming and streaming
 completions both answer, two processes, ~59 MB resident.
 
-Three details decide whether it works, and `src/upstream/headless.js` handles all of them:
+Four details decide whether it works, and `src/upstream/headless.js` handles all of them:
 
 1. the backend refuses to start without a login context (`loginMode is required`), which is rebuilt
    from `auth.json`;
-2. `DUMATE_INAPP_KEY` is a per-launch shared nonce, not a secret, so a fresh one is generated;
+2. `DUMATE_INAPP_KEY` is a per-launch shared nonce, not a secret, so a fresh one is generated — and
+   one nonce per start, used by both processes, because the base proxy takes it as an HTTP proxy
+   password while the backend sends it as `X-Dumate-Inapp-Key`;
 3. the backend resolves its data directory relative to the process working directory, which must be
-   `%APPDATA%\qianfan-desktop-app`.
+   `%APPDATA%\qianfan-desktop-app`;
+4. **the backend must be given the shell's proxy environment.** The Electron shell does not only
+   pass `DUMATE_*`; it also sets `HTTP(S)_PROXY` to
+   `http://proxy:<nonce>@127.0.0.1:<base proxy port>`, so the backend reaches the gateway *through
+   the base proxy*, which resolves the hostname itself. Started without that, the backend uses the
+   machine's own resolver, and an intermittent one shows up as a failed run in the harness —
+   `failed to forward request to upstream` in the UI, `dial tcp: lookup dumate-svc.baidu.com: no
+   such host` in `Main.log`, repeated for every retry. This was a real, reported outage on
+   2026-11-18 21:06 and 21:16; the same minute buckets in the log hold 15 and 8 resolver failures,
+   while the headless gateway logged **924 `status=200` and zero upstream failures** in that window,
+   which is why the failure looked like the harness's own forwarding and not the backend's DNS.
+
+   The login and nonce alone are not enough, and the symptom is misleading: everything looks
+   healthy (`/health` reports `online: true`, models list fine) until a request needs the upstream
+   and the resolver happens to fail.
 
 The plugin never starts anything by itself: `headless.enabled` adds the capability, `autoStart`
 (default `false`) is the only way to opt into load-time starts, and `stopOnUnload` defaults to
@@ -88,6 +107,49 @@ Only models that declare the `image` input modality receive pictures; the picker
 DuMate's own `modalities.input`. Verified against the real backend: a 76 KB screenshot goes through
 as one image part and the model describes its contents (`prompt_tokens` 1022 for that request).
 
+## Thinking control
+
+DuMate has exactly one thinking switch, and it is not the one the OpenAI API documents. Measured
+against the live proxy with `reasoning_tokens` as the observable (`deepseek-v41-flash`, 24-token
+budgets and a fixed prompt unless noted):
+
+| Attempted control | Result |
+| --- | --- |
+| `reasoning_effort: "high"` vs `"low"` | accepted, ignored — 19 reasoning tokens either way |
+| `enable_thinking` | ignored |
+| `thinking_budget`, `thinking_budget_tokens`, `thinking_token_budget` | ignored |
+| `chat_template_kwargs` | ignored |
+| `thinking: {type: "enabled", budget_tokens: 256}` vs `16384` | budget ignored — ~130 reasoning tokens both ways, and the direction is not even consistent across models (deepseek-v41-flash 136/129, glm-53 116/136, deepseek-v4-pro 193/116, qwen3.8-max 163/61) |
+| **`thinking: {type: "disabled"}`** | **works** — no `reasoning_content`, `completion_tokens` 21 → 2 |
+| `thinking: {type: "enabled"}` | works, and matches the no-field default |
+
+So the adapter offers two levels, never a ladder: `Off` sends `{type: 'disabled'}`, `On` sends
+`{type: 'enabled'}`, and an untouched selector sends no field at all. `src/reasoning.js` owns the
+mapping; `resolveModel()` exposes the list to the picker through the harness's
+`LlmModelReasoningInfo`, and the HTTP gateway translates `reasoning_effort` (OpenAI) and
+`thinking` (Anthropic) onto the same two values.
+
+**No `defaultEffort` is declared on purpose.** The harness materializes a declared default into
+every request, so declaring `on` would add a `thinking` field to every call — including sessions
+where nobody has ever opened the picker — changing existing behaviour to gain nothing, because the
+upstream already thinks by default. Leaving it absent keeps "nothing selected" meaning "nothing
+sent".
+
+Per-model behaviour, all 17 curated models probed with `{type: 'disabled'}`:
+
+- **obeys**: `deepseek-v4-flash-0731`, `deepseek-v4-pro`, `deepseek-v41-flash`, `doubao-seed-2-0-pro`,
+  `ernie-4.5-turbo-vl-32k`, `qwen2.5-vl-32b-instruct`, `qwen3.5-27b`, `qwen3.5-35b-a3b` (which had
+  no reasoning to begin with), `qwen3.5-397b-a17b`, `qwen3.8-max`, `qwen38-flash`, `qwen4-max`,
+  `model-text`;
+- **partly obeys** — still emits a little reasoning: `glm-53`, `glm-53-flash`, `kimi-k31` (32–41
+  reasoning tokens with a non-empty `reasoning_content`); their Off text says so;
+- **refuses** `Off`: `kimi-k3`, reproducible 400 `invalid temperature: only 0.6 is allowed for this
+  model` (the backend forwards that error from `tp.sdns.baidu.com`), which pinning
+  `temperature: 0.6` did not fix — so that model shows a single `On` level instead of a broken
+  option.
+
+`{type: 'enabled'}` is accepted by every model.
+
 ## Requirements
 
 - DeepSeek Harness 0.2.2 or newer.
@@ -102,6 +164,35 @@ as one image part and the model describes its contents (`prompt_tokens` 1022 for
 - DuMate rate-limits rapid repeated requests; a burst of test calls can surface `RATE_LIMIT`.
 - Headless mode cannot run on a machine that has never signed in to DuMate: it reuses the stored
   account rather than asking for one.
+
+### Usage numbers and the host's own statistics
+
+The ledger splits the prompt into three disjoint buckets, exactly like the host's
+`TokenUsage`: `input_tokens` is uncached input only, and `cache_read_tokens` /
+`cache_write_tokens` are counted separately. The panel's total adds all three plus
+output, which is what Settings → Usage prints; a panel that showed only uncached
+input would read about thirty times smaller than that page once prompt caching
+kicks in.
+
+Two processes share `~/.dsh/dumate-gateway/usage.json` (the host plugin and the
+loopback HTTP gateway), so each write re-reads the file when its mtime changed and
+merges counters with `max` rather than clobbering the other writer's rows.
+
+Rows written before 0.0.3 lack the cache keys and read as zero. They can be
+recovered from the DSH session logs, which record the full per-call usage
+attributed to the provider:
+
+```bash
+node tools/backfill-cache.mjs           # dry run: shows each day's before/after
+node tools/backfill-cache.mjs --write   # writes usage-recovered.json
+```
+
+The recovery lands in `~/.dsh/dumate-gateway/usage-recovered.json`, not in
+`usage.json`, and the usage module folds it in on every read. That separation is
+deliberate: a host process still running a pre-0.0.3 release rewrites
+`usage.json` from its own memory on each request, so anything written to that
+file from outside disappears on the next call. A file the old code never heard of
+survives until the process is restarted.
 
 ### Signing in once is enough
 

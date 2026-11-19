@@ -86,6 +86,22 @@ assert.equal(env.DUMATE_USER_ID, 'user-1')
 assert.equal(env.DUMATE_LAST_LOGIN_AT, '1794710796220')
 assert.equal(env.DUMATE_APP_VER, '1.0.92')
 
+// The desktop shell routes the backend's gateway calls through the base proxy
+// and the proxy resolves the name. Without these the backend falls back to the
+// machine's DNS, which is what produced `failed to forward request to upstream`.
+const expectedProxy = `http://proxy:${env.DUMATE_INAPP_KEY}@127.0.0.1:53231`
+for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']) {
+  assert.equal(env[key], expectedProxy, `${key} points at the base proxy with the launch nonce`)
+}
+assert.equal(env.NO_PROXY, 'localhost,127.0.0.1,::1')
+assert.equal(env.no_proxy, env.NO_PROXY)
+assert.equal(
+  headlessEnv(identity, { env: {}, baseProxyPort: 60000 }).HTTPS_PROXY.replace(/[0-9a-f]{64}/, 'NONCE'),
+  'http://proxy:NONCE@127.0.0.1:60000',
+  'the proxy URL follows the configured base proxy port',
+)
+assert.ok(!JSON.stringify(env).includes('undefined'), 'an unknown app version is omitted, never written as undefined')
+
 // -------------------------------------------------------------- start (fake)
 const open = new Set()
 const calls = []
@@ -149,6 +165,21 @@ const state = JSON.parse(fs.readFileSync(statePath, 'utf8'))
 assert.equal(state.baseProxyPid, proxy.pid ?? calls[0].pid)
 assert.equal(state.mainServerPid, nextPid)
 assert.equal(state.mainServerPort, 53232)
+
+// The launcher scripts are the only place the environment reaches the backend,
+// so the proxy variables have to be in the file, not just in the object.
+for (const name of ['base proxy.cmd', 'backend.cmd']) {
+  const script = fs.readFileSync(path.join(logDir, name), 'utf8')
+  assert.match(script, /^set "HTTPS_PROXY=http:\/\/proxy:[0-9a-f]{64}@127\.0\.0\.1:53231"$/m, `${name} routes through the base proxy`)
+  assert.match(script, /^set "NO_PROXY=localhost,127\.0\.0\.1,::1"$/m)
+  assert.ok(!/set "[A-Za-z_]+=undefined"/.test(script), `${name} never writes a literal undefined`)
+}
+assert.match(fs.readFileSync(path.join(logDir, 'backend.cmd'), 'utf8'), /"-proxy-port=53231"/, 'the backend forwards to our proxy port')
+assert.equal(
+  fs.readFileSync(path.join(logDir, 'backend.cmd'), 'utf8').match(/DUMATE_INAPP_KEY=([0-9a-f]{64})/)[1],
+  fs.readFileSync(path.join(logDir, 'base proxy.cmd'), 'utf8').match(/DUMATE_INAPP_KEY=([0-9a-f]{64})/)[1],
+  'both processes share one launch nonce, which is also the proxy password',
+)
 
 const running = await headless.status()
 assert.equal(running.running, true)

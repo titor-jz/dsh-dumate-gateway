@@ -89,10 +89,12 @@ window.__ModuleLoader__.load({
         margin: '2px 0 0',
       },
       propIn: { background: ACCENT, opacity: 0.42, borderRadius: '999px' },
+      propCache: { background: ACCENT, opacity: 0.16, borderRadius: '999px' },
       propOut: { background: ACCENT, borderRadius: '999px' },
-      legendRow: { display: 'flex', alignItems: 'center', gap: '10px' },
+      legendRow: { display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' },
       legend: { display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '10.5px', opacity: 0.72 },
       dotIn: { width: '6px', height: '6px', borderRadius: '50%', background: ACCENT, opacity: 0.42, display: 'inline-block' },
+      dotCache: { width: '6px', height: '6px', borderRadius: '50%', background: ACCENT, opacity: 0.16, display: 'inline-block' },
       dotOut: { width: '6px', height: '6px', borderRadius: '50%', background: ACCENT, display: 'inline-block' },
       mono: { fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace' },
       row: { display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' },
@@ -287,13 +289,20 @@ window.__ModuleLoader__.load({
         const day = byDate.get(key)
         const input = typeof day?.input_tokens === 'number' ? day.input_tokens : 0
         const output = typeof day?.output_tokens === 'number' ? day.output_tokens : 0
+        const cacheRead = typeof day?.cache_read_tokens === 'number' ? day.cache_read_tokens : 0
+        const cacheWrite = typeof day?.cache_write_tokens === 'number' ? day.cache_write_tokens : 0
         series.push({
           date: key,
           label: weekday(date),
           requests: typeof day?.requests === 'number' ? day.requests : 0,
           inputTokens: input,
           outputTokens: output,
-          tokens: input + output,
+          cacheReadTokens: cacheRead,
+          cacheWriteTokens: cacheWrite,
+          // Same total the host's own statistics print: cached input is real
+          // context that was sent, it is merely cheaper. Keeping it out made
+          // this panel disagree with Settings by a factor of thirty.
+          tokens: input + cacheRead + cacheWrite + output,
           errors: typeof day?.errors === 'number' ? day.errors : 0,
           isToday: offset === 0,
         })
@@ -389,8 +398,11 @@ window.__ModuleLoader__.load({
       const gap = 3
       const groupWidth = barWidth * 2 + gap
       const today = series[series.length - 1]
+      // Prompt total, matching the host's statistics: cache hits are context
+      // that was sent, just billed at a lower rate.
+      const promptOf = day => day.inputTokens + day.cacheReadTokens + day.cacheWriteTokens
       const heightsOf = day => ({
-        input: max > 0 && day.inputTokens > 0 ? Math.max(2, Math.round((day.inputTokens / max) * plot)) : 0,
+        input: max > 0 && promptOf(day) > 0 ? Math.max(2, Math.round((promptOf(day) / max) * plot)) : 0,
         output: max > 0 && day.outputTokens > 0 ? Math.max(2, Math.round((day.outputTokens / max) * plot)) : 0,
       })
 
@@ -430,7 +442,7 @@ window.__ModuleLoader__.load({
             fill: 'url(#dumate-gateway-out)',
             opacity: day.isToday ? 1 : 0.6,
           }) : null,
-          h('title', null, `${day.date} · ${day.inputTokens} in + ${day.outputTokens} out · ${day.requests} requests`)))
+          h('title', null, `${day.date} · ${promptOf(day)} in (${day.cacheReadTokens} cached) + ${day.outputTokens} out · ${day.requests} requests`)))
       })
 
       const todayHeights = heightsOf(today)
@@ -927,13 +939,16 @@ window.__ModuleLoader__.load({
           h('div', {
             style: styles.propTrack,
             role: 'img',
-            'aria-label': `Today ${today.inputTokens} tokens in, ${today.outputTokens} out`,
+            'aria-label': `Today ${today.inputTokens} uncached tokens in, ${today.cacheReadTokens} from cache, ${today.outputTokens} out`,
           },
+          today.cacheReadTokens > 0 ? h('span', { style: { ...styles.propCache, flex: String(today.cacheReadTokens) } }) : null,
           today.inputTokens > 0 ? h('span', { style: { ...styles.propIn, flex: String(today.inputTokens) } }) : null,
           today.outputTokens > 0 ? h('span', { style: { ...styles.propOut, flex: String(today.outputTokens) } }) : null),
           today.tokens === 0
             ? h('p', { style: styles.meta }, 'No requests yet today.')
             : h('div', { style: styles.legendRow },
+              h('span', { style: styles.legend },
+                h('span', { style: styles.dotCache }), `cached ${formatTokens(today.cacheReadTokens)}`),
               h('span', { style: styles.legend },
                 h('span', { style: styles.dotIn }), `in ${formatTokens(today.inputTokens)}`),
               h('span', { style: styles.legend },

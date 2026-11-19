@@ -18,6 +18,12 @@ What works today:
   file DuMate writes on every launch — curated to chat models by default (43 raw rows collapse to
   17 chat models on the author's install), with `models.mode: all` to see everything;
 - chat completions stream back with reasoning and text as separate blocks, usage before finish;
+- the model selector offers a **thinking level** (Off / On) because DuMate exposes exactly one such
+  switch — `thinking: {type: 'disabled' | 'enabled'}` in the request body. `reasoning_effort`,
+  `enable_thinking` and every `budget_tokens` spelling were probed and leave reasoning length
+  unchanged, so no fake ladder is offered; `kimi-k3` rejects `disabled` outright and therefore
+  shows a single level, and a few models (`glm-53`, `glm-53-flash`, `kimi-k31`) still emit a little
+  reasoning when asked to stop, which their option text says out loud (see `docs/DETAIL.md`);
 - function calling passes through: `tools` go upstream and a `tool_calls` reply is folded back into
   one call per tool, even though DuMate splits a call over several SSE fragments with drifting
   indices (see `docs/DETAIL.md`);
@@ -27,14 +33,17 @@ What works today:
   `[image attachment]` text);
 - when DuMate is not running, one placeholder model explains how to start it;
 - a loopback HTTP gateway serves the same upstream to ordinary clients;
-- a right-sidebar panel is a small dashboard: upstream status, today's tokens with an in/out
-  proportion bar and a seven-day paired chart, a first-token latency sparkline, a test box with a
-  one-click connection probe, quick copy actions, and two closed drawers (models, diagnostics) — all fed over the host's same-origin `/api/dumate-gateway/status`
-  route (no CORS or CSP surprises), refreshed every 15 seconds;
+- a right-sidebar panel is a small dashboard: upstream status, today's tokens with a
+  cached/in/out proportion bar and a seven-day paired chart, a first-token latency sparkline, a
+  test box with a one-click connection probe, quick copy actions, and two closed drawers (models,
+  diagnostics) — all fed over the host's same-origin `/api/dumate-gateway/status` route (no CORS or
+  CSP surprises), refreshed every 15 seconds;
 - the panel can send **one small test message** — pick which model it uses from a dropdown — and
   keeps a local usage ledger: today's requests, tokens in and out, and errors, in
   `~/.dsh/dumate-gateway/usage.json` for seven days, never sent anywhere. The latency sparkline
-  lives in the page's `localStorage`, not in that file;
+  lives in the page's `localStorage`, not in that file. Cache-hit tokens are counted in their own
+  bucket and folded into the total, so the panel's `in` figure is comparable with the host's
+  Settings → Usage page, which sums cache reads into the prompt;
 - a **one-click Probe** answers "is it connected right now?" with a 16-token ping, reporting the
   model it reached and first-token/total latency — or the exact reason it failed, without spending
   a real completion;
@@ -77,7 +86,7 @@ https://raw.githubusercontent.com/titor-jz/dsh-dumate-gateway/main/market/index.
 
 1. `Plugins` → **Experimental plugins** → switch on **Custom plugin indexes**.
 2. Open the **Discover** tab → **Add index source** → paste the URL above.
-3. Select **DuMate gateway** → **Install**. It installs `dsh-dumate-gateway@0.0.2` from npm.
+3. Select **DuMate gateway** → **Install**. It installs `dsh-dumate-gateway` from npm.
 
 Without an index you can still install it directly: `Plugins` → **Add plugin** → paste
 `dsh-dumate-gateway` (npm), or `git+https://github.com/titor-jz/dsh-dumate-gateway.git`, or point the
@@ -101,7 +110,9 @@ curl -N http://127.0.0.1:7321/v1/chat/completions \
 ```
 
 Anthropic-shaped clients (for example Claude Code pointed at the gateway) can call
-`POST /v1/messages`; thinking blocks are not forwarded, text and stop reasons are.
+`POST /v1/messages`; text and stop reasons are forwarded, and `thinking: {type: 'disabled'}`
+turns upstream reasoning off (the reasoning text itself is not relayed back as thinking blocks).
+OpenAI-shaped callers get the same switch through `reasoning_effort: "none"`.
 
 ## Optional: a provider row on Settings → Models
 
@@ -146,6 +157,12 @@ What it does, and what it deliberately does not:
   credentials and cannot work on a machine that never signed in to DuMate;
 - it starts `dumate-base-proxy.exe` and `dumate-main-server.exe` from the installed app, with the
   working directory the backend expects; nothing is downloaded, patched or modified;
+- it hands the backend the same proxy environment the Electron shell does —
+  `HTTP(S)_PROXY` pointing at the base proxy, with the launch nonce as the proxy password. That is
+  not cosmetic: the backend reaches Baidu's gateway *through* that proxy, which resolves the
+  hostname. Without it, the backend falls back to the machine's resolver, and an unreliable one
+  shows up as `failed to forward request to upstream` on some runs while everything else looks
+  healthy. This was a real bug here until 0.0.5;
 - it does nothing while the desktop app is running: the app wins, and headless owns separate ports;
 - a failed start is not retried on every message (one attempt per minute at most), so a chat retry
   never becomes a spawn storm.

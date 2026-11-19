@@ -67,6 +67,38 @@
       },
       "versions": [
         {
+          "version": "0.0.5",
+          "publishTimestamp": 1795071843,
+          "source": {
+            "type": "npm"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.1"
+          }
+        },
+        {
+          "version": "0.0.4",
+          "publishTimestamp": 1795002482,
+          "source": {
+            "type": "npm",
+            "registry": "https://registry.npmjs.org"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.1"
+          }
+        },
+        {
+          "version": "0.0.3",
+          "publishTimestamp": 1795000000,
+          "source": {
+            "type": "npm",
+            "registry": "https://registry.npmjs.org"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.1"
+          }
+        },
+        {
           "version": "0.0.2",
           "publishTimestamp": 1794969316,
           "source": {

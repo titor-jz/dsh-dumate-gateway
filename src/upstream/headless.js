@@ -41,6 +41,8 @@ const START_TIMEOUT_MS = 30_000
 const PROBE_INTERVAL_MS = 300
 /** A failed auto-start is not retried more often than this. */
 const RETRY_COOLDOWN_MS = 60_000
+/** Non-`DUMATE_` environment keys the launcher must write too (see `headlessEnv`). */
+const LAUNCHER_KEYS = new Set(['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy'])
 
 /**
  * Paths and ports for one machine. Everything is overridable so the tests and
@@ -103,13 +105,38 @@ export function readIdentity(settings) {
 }
 
 /**
- * Environment the backend needs. Only the values proven to be load-bearing are
- * set: login context, the shared nonce, and the app version for telemetry.
+ * Environment the backend needs.
+ *
+ * Load bearing, each proven the hard way:
+ *
+ *  - the login context (`DUMATE_LOGIN_*`) without which the backend refuses to
+ *    start;
+ *  - the shared nonce `DUMATE_INAPP_KEY`;
+ *  - the app version, for the telemetry header the gateway sees;
+ *  - **the proxy variables**, which are not obvious and cost a real outage
+ *    before they were found. When the desktop shell starts the backend it also
+ *    sets `HTTP(S)_PROXY` to `http://proxy:<nonce>@127.0.0.1:<base proxy>`, so
+ *    the backend sends every gateway call through the base proxy, which
+ *    resolves the name itself. Started without them the backend resolves
+ *    `dumate-svc.baidu.com` with the machine's own DNS, and an intermittent
+ *    resolver then surfaces to the user as `failed to forward request to
+ *    upstream` with `lookup … no such host` in the log.
  */
-export function headlessEnv(identity, { appVersion = '1.0.92.512', env = process.env } = {}) {
+export function headlessEnv(identity, {
+  appVersion = '1.0.92.512',
+  baseProxyPort = DEFAULT_BASE_PROXY_PORT,
+  inappKey = null,
+  env = process.env,
+} = {}) {
+  // One nonce per *start*, not per process: the proxy accepts only the value the
+  // backend sends as its password, so both launchers must carry the same string.
+  const nonce = typeof inappKey === 'string' && inappKey !== '' ? inappKey : randomBytes(32).toString('hex')
+  // The base proxy authenticates with the same nonce the shell and the backend
+  // share; `proxy` is the user name the shell uses too.
+  const proxyURL = `http://proxy:${nonce}@127.0.0.1:${baseProxyPort}`
   return {
     ...env,
-    DUMATE_INAPP_KEY: randomBytes(32).toString('hex'),
+    DUMATE_INAPP_KEY: nonce,
     DUMATE_LOGIN_MODE: 'personal',
     DUMATE_LOGIN_USER_ID: identity.userId,
     DUMATE_LOGIN_BCE_ACCOUNT_ID: identity.accountId,
@@ -119,6 +146,12 @@ export function headlessEnv(identity, { appVersion = '1.0.92.512', env = process
     DUMATE_DEPLOYMENT_MODE: 'public',
     DUMATE_APP_VER: appVersion,
     DUMATE_EDITION: 'dumate',
+    HTTP_PROXY: proxyURL,
+    HTTPS_PROXY: proxyURL,
+    http_proxy: proxyURL,
+    https_proxy: proxyURL,
+    NO_PROXY: 'localhost,127.0.0.1,::1',
+    no_proxy: 'localhost,127.0.0.1,::1',
   }
 }
 
@@ -145,7 +178,7 @@ export function createHeadless({
     return join(settings.logDir, name)
   }
 
-  function launch(exe, args, name) {
+  function launch(exe, args, name, inappKey) {
     const identity = readIdentity(settings)
     if (identity === null) return null
     // The child must outlive this process (DSH restarts, the plugin reloads) and
@@ -158,8 +191,15 @@ export function createHeadless({
     const lines = [
       '@echo off',
       `cd /d "${settings.appDataDir}"`,
-      ...Object.entries(headlessEnv(identity, { appVersion: appVersion(settings), env }))
-        .filter(([key]) => key.startsWith('DUMATE_'))
+      ...Object.entries(headlessEnv(identity, {
+        appVersion: appVersion(settings),
+        baseProxyPort: settings.baseProxyPort,
+        inappKey,
+        env,
+      }))
+        // The proxy variables are as load bearing as the `DUMATE_` ones: without
+        // them the backend resolves the gateway host with the machine's DNS.
+        .filter(([key, value]) => value !== undefined && (key.startsWith('DUMATE_') || LAUNCHER_KEYS.has(key)))
         .map(([key, value]) => `set "${key}=${value}"`),
       `"${exe}" ${args.map(argument => `"${argument}"`).join(' ')}`,
       '',
@@ -268,9 +308,12 @@ export function createHeadless({
       if (appBaseURL !== null) return { ok: true, baseURL: appBaseURL, already: true, external: true }
 
       mkdirSync(settings.logDir, { recursive: true })
+      // One nonce for both processes: the proxy takes it as a password and the
+      // backend sends it as `X-Dumate-Inapp-Key`, so a mismatch means 401s.
+      const inappKey = randomBytes(32).toString('hex')
       // The proxy mints gateway tokens from the account cookie; the backend
       // needs it listening before its first token request.
-      const proxy = launch(settings.baseProxyExe, ['--host=127.0.0.1', `--port=${settings.baseProxyPort}`], 'base proxy')
+      const proxy = launch(settings.baseProxyExe, ['--host=127.0.0.1', `--port=${settings.baseProxyPort}`], 'base proxy', inappKey)
       if (!await waitForPort(settings.baseProxyPort, 15_000)) {
         killTree(proxy.pid)
         lastError = `DuMate's base proxy did not start on port ${settings.baseProxyPort}.`
@@ -288,7 +331,7 @@ export function createHeadless({
         `--log-dir=${join(settings.logDir, 'desktop-main')}`,
         '--log-stdout=0',
         '-opencode-cp-enable=false',
-      ], 'backend')
+      ], 'backend', inappKey)
       if (!await waitForPort(settings.mainServerPort)) {
         killTree(server.pid)
         killTree(proxy.pid)
@@ -366,16 +409,43 @@ export function createHeadless({
   return { start, stop, ensure, status, settings }
 }
 
-/** Latest version the desktop app recorded, for the backend's telemetry field. */
+/**
+ * Latest version the desktop app recorded, for the backend's telemetry field.
+ *
+ * `app.json` keeps every version the app has ever started (`launchedVersions`),
+ * so the newest key is the installed one. The comparison is numeric per part:
+ * a plain string sort puts `1.0.9` above `1.0.10` and would under-report the
+ * version the gateway sees. Returns `undefined` when the file is unreadable, and
+ * `headlessEnv` then leaves the variable out rather than writing `undefined`
+ * into the launcher script.
+ */
 function appVersion(settings) {
   try {
     const json = JSON.parse(readFileSync(join(settings.appDataDir, 'app.json'), 'utf8'))
     const versions = Object.keys(json?.startupTracking?.launchedVersions ?? {})
     if (versions.length === 0) return undefined
-    return versions.sort().at(-1)
+    return versions.sort(compareVersions).at(-1)
   } catch {
     return undefined
   }
+}
+
+/** `1.0.10` is newer than `1.0.9`; non-numeric parts compare as text. */
+function compareVersions(left, right) {
+  const a = String(left).split('.')
+  const b = String(right).split('.')
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const x = a[index] ?? '0'
+    const y = b[index] ?? '0'
+    const nx = Number(x)
+    const ny = Number(y)
+    if (Number.isFinite(nx) && Number.isFinite(ny)) {
+      if (nx !== ny) return nx - ny
+    } else if (x !== y) {
+      return x < y ? -1 : 1
+    }
+  }
+  return 0
 }
 
 /** Kill a process and its children; `SIGTERM` on Windows does not do that. */

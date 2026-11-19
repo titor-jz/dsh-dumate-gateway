@@ -14,12 +14,13 @@
 - 作为 bundle 装进 DSH 的 profile；
 - 模型选择器里直接出现 DuMate 的**实时模型表**，带真实上下文窗口，默认只留对话模型（作者这台机器 43 条原始记录筛成 17 条），想看全部就把 `models.mode` 设成 `all`；
 - 对话真流式：推理块和正文字块分开到达，`usage` 在结束块之前给出；
+- 模型选择器里有**思考强度**开关（Off / On）——DuMate 只提供这一个思考开关，就是请求体里的 `thinking: {type: 'disabled' | 'enabled'}`；`reasoning_effort`、`enable_thinking` 和所有 `budget_tokens` 写法都实测过，推理长度完全不变，所以不做假的档位阶梯。`kimi-k3` 直接拒绝 `disabled`，因此只给一档；`glm-53`、`glm-53-flash`、`kimi-k31` 被要求停时仍会吐少量推理，各自的选项文案里写明了（见 `docs/DETAIL.md`）；
 - 函数调用（tool calls）可透传：`tools` 原样发给上游，返回的 `tool_calls` 会被折回「一个工具一个调用」——DuMate 会把一次调用拆成多个 SSE 分片且 `index` 会漂移，插件负责合并（见 `docs/DETAIL.md`）；
 - 图片输入对支持视觉的模型真的可用：附件从 DSH 的 attachment 服务取出，按 `image_url` 发给上游，模型能看到图——否则宿主只给适配器一个不透明 id，图片过去只会变成 `[image attachment]` 文本；
 - DuMate 没启动时，只给一个 `Hello` 占位模型，提示你去启动它；
 - 另起一个只绑 `127.0.0.1` 的 HTTP 网关，普通客户端也能用（OpenAI 形状，外加最小 Anthropic 形状）；
-- 右侧栏面板是一个小仪表盘：上游状态、今日 token（in/out 占比条 + 7 日成对柱状图）、首字延迟走势、试聊框、一键探针、复制按钮，外加两个默认折叠的抽屉（模型列表、诊断信息）；数据走宿主**同源** `/api/dumate-gateway/status`，15 秒刷新一次，不碰跨域；
-- 面板可以发**一条很小的测试消息**（下拉选模型），并记本地用量：今天的请求数、in/out token、错误数，写在 `~/.dsh/dumate-gateway/usage.json`，保留 7 天，不外发；
+- 右侧栏面板是一个小仪表盘：上游状态、今日 token（cached/in/out 占比条 + 7 日成对柱状图）、首字延迟走势、试聊框、一键探针、复制按钮，外加两个默认折叠的抽屉（模型列表、诊断信息）；数据走宿主**同源** `/api/dumate-gateway/status`，15 秒刷新一次，不碰跨域；
+- 面板可以发**一条很小的测试消息**（下拉选模型），并记本地用量：今天的请求数、in/out token、错误数，写在 `~/.dsh/dumate-gateway/usage.json`，保留 7 天，不外发；缓存命中单独计一档并计入合计，所以面板的 `in` 数字和宿主「设置 → 使用统计」页（把缓存读并入 prompt）口径一致；
 - **一键 Probe**：16 token 的 ping，直接回答「现在通不通」，报告命中的模型和首字/总耗时，失败时给出确切原因，不浪费一次正式生成；
 - **headless 模式**：只启动网关需要的两个 DuMate 二进制，约 59 MB 而不是一个多 G；默认不会自己启动，必须由你按 **Start headless** 才开始。停止时先确认该 pid 仍运行 DuMate 的镜像才结束进程；如果桌面端和这两个后台进程同时在线，面板会给出警告（两者共用一个数据目录）。
 
@@ -52,7 +53,7 @@ https://raw.githubusercontent.com/titor-jz/dsh-dumate-gateway/main/market/index.
 
 1. `Plugins` → Experimental plugins → 打开 **Custom plugin indexes**；
 2. 进 **Discover** → **Add index source** → 粘贴上面的 URL；
-3. 选中 **DuMate gateway** → **Install**（从 npm 装 `dsh-dumate-gateway@0.0.2`）。
+3. 选中 **DuMate gateway** → **Install**（从 npm 装 `dsh-dumate-gateway`）。
 
 ### 方式二：直接装
 
@@ -73,7 +74,7 @@ curl -N http://127.0.0.1:7321/v1/chat/completions \
   -d '{"model":"deepseek-v4-flash-0731","messages":[{"role":"user","content":"hi"}],"stream":true}'
 ```
 
-Anthropic 形状的客户端（比如把 Claude Code 指过来）可以调 `POST /v1/messages`：转发正文和停止原因，转发不了 thinking 块。
+Anthropic 形状的客户端（比如把 Claude Code 指过来）可以调 `POST /v1/messages`：转发正文和停止原因；`thinking: {type: 'disabled'}` 能关掉上游思考（但思考文本本身不会作为 thinking 块回传）。OpenAI 形状的调用方用 `reasoning_effort: "none"` 得到同一个开关。
 
 ## 可选：在「设置 → 模型」页加一行
 
@@ -104,6 +105,7 @@ headless:
 
 - 复用你已经登录的账号：只读 `auth.json`，**不会要求输入凭据**；从没登录过 DuMate 的机器用不了；
 - 从已安装的 DuMate 里起 `dumate-base-proxy.exe` 与 `dumate-main-server.exe`，工作目录设成后端期望的位置；不下载、不修改任何文件；
+- 给它注入和 Electron 外壳一样的代理环境变量：`HTTP(S)_PROXY` 指向 base-proxy，密码用本次启动的 nonce。这不是可选项——后端是**经**这个代理去访问百度网关的，域名也由代理解析；不给它，后端就会退回本机 DNS，DNS 一抖就会变成某些轮次报 `failed to forward request to upstream`，而其他一切看起来都正常。0.0.5 之前这里确实有这个 bug；
 - 桌面端开着时它什么都不做：桌面端优先，headless 用自己独立的端口；
 - 启动失败不会按每条消息重试（最多每分钟一次），所以聊天重试不会变成进程风暴。
 

@@ -43,6 +43,37 @@ const saved = JSON.parse(fs.readFileSync(file, 'utf8'))
 assert.equal(saved.version, 1)
 assert.equal(saved.days[one.today].requests, 3)
 
+// Cache hits are a separate bucket, not folded into the uncached prompt count,
+// because the host's own statistics print them as separate columns.
+record({ kind: 'dsh', model: 'model-text', usage: { inputTokens: 100, outputTokens: 20, cacheReadTokens: 5000, cacheWriteTokens: 0 }, ms: 10 })
+const cached = snapshot()
+assert.equal(cached.input_tokens, 1340, 'cache reads stay out of the uncached input count')
+assert.equal(cached.cache_read_tokens, 5000)
+assert.equal(cached.cache_write_tokens, 0)
+assert.equal(cached.days.at(-1).cache_read_tokens, 5000, 'the per-day row carries cache too')
+
+// Another process (the HTTP gateway) writes the shared file between our calls.
+// Its rows must merge rather than being erased by our next write, and merging
+// the same file twice must not double count.
+const shared = { version: 1, days: {} }
+shared.days[snapshot().today] = {
+  requests: 999,
+  input_tokens: 99000,
+  output_tokens: 900,
+  cache_read_tokens: 123456,
+  cache_write_tokens: 7,
+  errors: 0,
+  by_kind: { http: { requests: 999, input_tokens: 99000, output_tokens: 900, cache_read_tokens: 123456, cache_write_tokens: 7, errors: 0 } },
+  last: { at: '2999-01-01T00:00:00.000Z', kind: 'http', model: null, ok: true, code: null, ms: 1 },
+}
+fs.writeFileSync(file, `${JSON.stringify(shared, null, 2)}\n`)
+const merged = snapshot()
+assert.equal(merged.cache_read_tokens, 123456, 'a row written by another process survives')
+assert.equal(merged.requests, 999, 'monotonic counters reconcile with max')
+assert.equal(merged.last.kind, 'http', 'the newer last record wins')
+const beforeSecond = JSON.stringify(snapshot())
+assert.equal(JSON.stringify(snapshot()), beforeSecond, 'merging the same file again is a no-op')
+
 // A malformed file is treated as empty, never as an error.
 fs.writeFileSync(file, '{not json')
 const reloaded = await import(`../src/usage.js?fresh=${Date.now()}`)

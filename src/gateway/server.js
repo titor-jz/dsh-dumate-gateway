@@ -9,6 +9,7 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { failureFromResponse, llmFailure, GatewayError } from '../failure.js'
+import { effortFromAnthropic, effortFromOpenAI, thinkingPayload } from '../reasoning.js'
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const HOST = '127.0.0.1'
@@ -165,6 +166,7 @@ async function handleChatCompletions(req, res, deps) {
     temperature: typeof body?.temperature === 'number' ? body.temperature : undefined,
     maxTokens: numberOr(body?.max_tokens ?? body?.max_completion_tokens),
     stop: Array.isArray(body?.stop) ? body.stop : typeof body?.stop === 'string' ? [body.stop] : undefined,
+    thinking: thinkingPayload(effortFromOpenAI(body?.reasoning_effort)),
     signal: controller.signal,
     kind: 'http',
   })
@@ -334,6 +336,10 @@ async function handleAnthropicMessages(req, res, deps) {
     temperature: typeof body?.temperature === 'number' ? body.temperature : undefined,
     maxTokens: numberOr(body?.max_tokens),
     stop: Array.isArray(body?.stop_sequences) ? body.stop_sequences : undefined,
+    // Anthropic clients send `thinking: {type: 'enabled'|'disabled'}`; it maps
+    // onto the same two upstream levels, so a Claude client can turn thinking
+    // off without a special case here.
+    thinking: thinkingPayload(effortFromAnthropic(body?.thinking)),
     signal: controller.signal,
     kind: 'http',
   })

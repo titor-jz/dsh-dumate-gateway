@@ -17,6 +17,7 @@ import { record } from '../usage.js'
  *   temperature?: number,
  *   maxTokens?: number,
  *   stop?: readonly string[],
+ *   thinking?: {type: 'enabled' | 'disabled'} | null,
  *   signal?: AbortSignal,
  *   kind?: 'dsh' | 'http' | 'try' | 'chat',
  * }} options
@@ -89,7 +90,7 @@ async function* mergeToolCallFragments(events) {
 
 async function* streamUpstream(options) {
   const {
-    baseURL, apiKey, model, messages, tools, temperature, maxTokens, stop, signal,
+    baseURL, apiKey, model, messages, tools, temperature, maxTokens, stop, thinking, signal,
   } = options
 
   const body = { model, messages, stream: true, stream_options: { include_usage: true } }
@@ -97,6 +98,9 @@ async function* streamUpstream(options) {
   if (typeof temperature === 'number') body.temperature = temperature
   if (typeof maxTokens === 'number' && maxTokens > 0) body.max_tokens = maxTokens
   if (Array.isArray(stop) && stop.length > 0) body.stop = stop
+  // DuMate honours only this object; `reasoning_effort` and budget fields are
+  // accepted and ignored, so the caller resolves a level to these two values.
+  if (thinking !== null && typeof thinking === 'object') body.thinking = thinking
 
   const headers = { 'content-type': 'application/json', accept: 'text/event-stream' }
   if (typeof apiKey === 'string' && apiKey !== '') headers.authorization = `Bearer ${apiKey}`
